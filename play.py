@@ -6,7 +6,7 @@ import sys
 import keyboard as pressed
 from bidict import bidict
 
-from multiprocessing import Process
+from multiprocessing import Process, Manager
 from threading import Event
 import signal
 
@@ -56,7 +56,6 @@ keyboard = KeyboardController()
 mem = {}
 
 def keyboard_press(key):
-    print(key)
     keyboard.press(key)
     mem[key] = True
 
@@ -80,77 +79,87 @@ def return_key(key):
     else:
         return key
 
-global instruction_index
 global play_count
 global number_of_instructions
 
 global is_running
 
-instruction_index = 0
-
 play_count = 0
 number_of_instructions = len(data)
 
+instruction_index = 0
+
 is_running = False
-    
-async def instance():
+
+def schedule_task(index, result_dict):
+    global is_running
     global play_count
     global number_of_instructions
 
-    global is_running
-    global ii_temp
+    global reset
+    reset = False
 
-    global instruction_index
+    def on_pause(event):
+        global is_running
+        if is_running:
+            close()
+            blocker.set()
+            is_running = False
 
-    print(instruction_index)
+    def on_restart(event):
+        global reset
+        global is_running
+        if is_running:
+            close()
+            blocker.set()
+            is_running = False
+            reset = True
 
-    print("Press '*' to start")
-    print("Press '*' again to pause")
+    pressed.on_press_key("*", on_pause)
+    pressed.on_press_key("-", on_restart)
+
+    print("Press '*' to play/pause")
+    print("Press '-' to stop")
     print("Press 'Shift+Escape' to exit")
-    await wait_until_pressed("*")
+    pressed.wait("*")
     print("Starting in 1...")
     blocker.wait(1)
 
     is_running = True
 
     while play_count < number_of_plays and not blocker.is_set():
-        while instruction_index < number_of_instructions and not blocker.is_set():
-            print(f"ii: {instruction_index}")
-            obj = data[instruction_index]
+        while index < number_of_instructions and not blocker.is_set():
+            obj = data[index]
 
             action, _time= obj['action'], obj['_time']
             try:
-                next_movement = data[instruction_index+1]['_time']
+                next_movement = data[index+1]['_time']
                 pause_time = next_movement - _time
             except IndexError as e:
                 pause_time = 0
             if action == "pressed_key" or action == "released_key":
                 key = special_keys[return_key(obj['key'])] if return_key(obj['key']) in special_keys else return_key(obj['key'])
-                print("action: {0}, time: {1}, key: {2}".format(action, _time, str(key)))
+                print(f"action: {index} {action}, time: {_time}, key: {str(key)}")
                 if action == "pressed_key":
                     keyboard_press(key)
                 else:
                     keyboard_release(key)
                 blocker.wait(pause_time)
 
-            instruction_index += 1
+            index += 1
 
-        instruction_index = 0
+        if blocker.isSet():
+            break
+        
+        index = 0
         play_count += 1
 
-def schedule_task():
-    global instruction_index
+    result_dict["index"] = index
 
-    def on_esc():
-        global is_running
-        if is_running:
-            close()
-            blocker.set()
-            is_running = False
-            os.kill(os.getpid(), signal.SIGTERM)
+    if reset:
+        result_dict["index"] = 0
 
-    pressed.add_hotkey("*", on_esc)
-    asyncio.run(instance())
+    return result_dict
 
 p = None
 
@@ -165,8 +174,14 @@ pressed.add_hotkey("shift+esc", on_esc)
     
 
 if __name__ == "__main__":
+
     while True:
+        manager = Manager()
+        result_dict = manager.dict()
         blocker.clear()
-        p = Process(target=schedule_task)
+        p = Process(target=schedule_task, args=(instruction_index, result_dict))
         p.start()
         p.join()
+
+        instruction_index = result_dict.values()[0]
+
