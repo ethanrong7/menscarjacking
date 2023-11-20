@@ -16,21 +16,6 @@ import os
 blocker = Event()
 wait_until_pressed_event = Event()
 
-mem = {}
-
-def keyboard_press(key):
-    pressed.press(key)
-    mem[key] = True
-
-def keyboard_release(key):
-    pressed.release(key)
-    mem[key] = False
-
-def close():
-    for key in mem.keys():
-        pressed.release(key)
-    mem.clear()
-
 async def wait_until_pressed(key):
     global is_pressed
     is_pressed = False
@@ -68,6 +53,22 @@ special_keys = {"Key.shift": Key.shift, "Key.tab": Key.tab, "Key.caps_lock": Key
 mouse = MouseController()
 keyboard = KeyboardController()
 
+mem = {}
+
+def keyboard_press(key):
+    print(key)
+    keyboard.press(key)
+    mem[key] = True
+
+def keyboard_release(key):
+    keyboard.release(key)
+    mem[key] = False
+
+def close():
+    for key in mem.keys():
+        keyboard.release(key)
+    mem.clear()
+
 with open('key_mapping.json', 'r') as file:
     key_mapping_data = json.load(file)
 
@@ -100,6 +101,8 @@ async def instance():
     global ii_temp
 
     global instruction_index
+
+    print(instruction_index)
 
     print("Press '*' to start")
     print("Press '*' again to pause")
