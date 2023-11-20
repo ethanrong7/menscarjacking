@@ -5,7 +5,48 @@ import json
 import sys
 import keyboard as pressed
 from bidict import bidict
-import threading
+
+from multiprocessing import Process
+from threading import Event
+import signal
+
+import asyncio
+import os
+
+blocker = Event()
+wait_until_pressed_event = Event()
+
+mem = {}
+
+def keyboard_press(key):
+    pressed.press(key)
+    mem[key] = True
+
+def keyboard_release(key):
+    pressed.release(key)
+    mem[key] = False
+
+def close():
+    for key in mem.keys():
+        pressed.release(key)
+    mem.clear()
+
+async def wait_until_pressed(key):
+    global is_pressed
+    is_pressed = False
+    wait_until_pressed_event.clear()
+
+    def toggle():
+        wait_until_pressed_event.set()
+        global is_pressed
+        is_pressed = True
+
+    cb = pressed.add_hotkey(key, toggle)
+
+    while not is_pressed and not wait_until_pressed_event.is_set():
+        wait_until_pressed_event.wait(0.5)
+
+    pressed.remove_hotkey(cb)
 
 n = len(sys.argv)
 
@@ -27,17 +68,10 @@ special_keys = {"Key.shift": Key.shift, "Key.tab": Key.tab, "Key.caps_lock": Key
 mouse = MouseController()
 keyboard = KeyboardController()
 
-program_running = True
-paused = False
-
 with open('key_mapping.json', 'r') as file:
     key_mapping_data = json.load(file)
 
 map = bidict(key_mapping_data)
-
-def toggle_pause():
-    global paused
-    paused = not paused
 
 def return_key(key):
     if key in map.values():
@@ -45,41 +79,74 @@ def return_key(key):
     else:
         return key
 
-print("Program is starting soon in 3 seconds...")
-time.sleep(1)
-print("Program is starting soon in 2 seconds...")
-time.sleep(1)
-print("Program is starting soon in 1 seconds...")
-time.sleep(1)
+global instruction_index
+global play_count
+global number_of_instructions
+instruction_index = 0
+play_count = 0
+number_of_instructions = len(data)
+    
+async def instance():
+    global instruction_index
+    global play_count
+    global number_of_instructions
 
-while program_running:
-    for loop in range(number_of_plays):
-        for index, obj in enumerate(data):
-            if pressed.is_pressed('F1'):
-                    pressed.unhook_all()
-                    sys.exit(0)
-            if pressed.is_pressed('F2'):
-                paused = True
-                print(f"paused: {paused}")
-            if pressed.is_pressed('F3'):
-                paused = False
-                print(f"resumed: {paused}")
-            if not paused:
-                # if index == 1:
-                #     continue
-                action, _time= obj['action'], obj['_time']
-                try:
-                    next_movement = data[index+1]['_time']
-                    pause_time = next_movement - _time
-                except IndexError as e:
-                    pause_time = 0
-                if action == "pressed_key" or action == "released_key":
-                    key = special_keys[return_key(obj['key'])] if return_key(obj['key']) in special_keys else return_key(obj['key'])
-                    print("action: {0}, time: {1}, key: {2}".format(action, _time, str(key)))
-                    if action == "pressed_key":
-                        keyboard.press(key)
-                    else:
-                        keyboard.release(key)
-                    time.sleep(pause_time)
+    print("Press '*' to start")
+    print("Press 'RightAlt' to restart")
+    print("Press 'Shift+Escape' to exit")
+    await wait_until_pressed("*")
+    print("Starting in 1...")
+    blocker.wait(1)
+
+    while play_count < number_of_plays and not blocker.is_set():
+        while instruction_index < number_of_instructions and not blocker.is_set():
+            obj = data[instruction_index]
+            index = instruction_index
+
+            action, _time= obj['action'], obj['_time']
+            try:
+                next_movement = data[index+1]['_time']
+                pause_time = next_movement - _time
+            except IndexError as e:
+                pause_time = 0
+            if action == "pressed_key" or action == "released_key":
+                key = special_keys[return_key(obj['key'])] if return_key(obj['key']) in special_keys else return_key(obj['key'])
+                print("action: {0}, time: {1}, key: {2}".format(action, _time, str(key)))
+                if action == "pressed_key":
+                    keyboard.press(key)
+                else:
+                    keyboard.release(key)
+                blocker.wait(pause_time)
+
+            instruction_index += 1
+
+        instruction_index = 0
+        play_count += 1
+
+def schedule_task():
+    def on_esc():
+        close()
+        blocker.set()
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    pressed.add_hotkey("right alt", on_esc)
+    asyncio.run(instance())
+
+p = None
+
+def on_esc():
+    if p != None:
+        close()
+        p.kill()
+    os.kill(os.getpid(), signal.SIGTERM)
+
+pressed.add_hotkey("shift+esc", on_esc)
+    
+while True:
+    blocker.clear()
+    p = Process(target=schedule_task)
+    p.start()
+    p.join()
+
 
 
