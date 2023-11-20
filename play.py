@@ -82,30 +82,42 @@ def return_key(key):
 global instruction_index
 global play_count
 global number_of_instructions
+
+global is_running
+
 instruction_index = 0
+
 play_count = 0
 number_of_instructions = len(data)
+
+is_running = False
     
 async def instance():
-    global instruction_index
     global play_count
     global number_of_instructions
 
+    global is_running
+    global ii_temp
+
+    global instruction_index
+
     print("Press '*' to start")
-    print("Press 'RightAlt' to restart")
+    print("Press '*' again to pause")
     print("Press 'Shift+Escape' to exit")
     await wait_until_pressed("*")
     print("Starting in 1...")
     blocker.wait(1)
 
+    is_running = True
+
     while play_count < number_of_plays and not blocker.is_set():
         while instruction_index < number_of_instructions and not blocker.is_set():
+            print(f"ii: {instruction_index}")
             obj = data[instruction_index]
-            index = instruction_index
 
             action, _time= obj['action'], obj['_time']
             try:
-                next_movement = data[index+1]['_time']
+                next_movement = data[instruction_index+1]['_time']
                 pause_time = next_movement - _time
             except IndexError as e:
                 pause_time = 0
@@ -124,17 +136,23 @@ async def instance():
         play_count += 1
 
 def schedule_task():
-    def on_esc():
-        close()
-        blocker.set()
-        os.kill(os.getpid(), signal.SIGTERM)
+    global instruction_index
 
-    pressed.add_hotkey("right alt", on_esc)
+    def on_esc():
+        global is_running
+        if is_running:
+            close()
+            blocker.set()
+            is_running = False
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    pressed.add_hotkey("*", on_esc)
     asyncio.run(instance())
 
 p = None
 
 def on_esc():
+    global is_running
     if p != None:
         close()
         p.kill()
@@ -142,11 +160,10 @@ def on_esc():
 
 pressed.add_hotkey("shift+esc", on_esc)
     
-while True:
-    blocker.clear()
-    p = Process(target=schedule_task)
-    p.start()
-    p.join()
 
-
-
+if __name__ == "__main__":
+    while True:
+        blocker.clear()
+        p = Process(target=schedule_task)
+        p.start()
+        p.join()
