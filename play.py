@@ -125,9 +125,9 @@ async def instance():
                 key = special_keys[return_key(obj['key'])] if return_key(obj['key']) in special_keys else return_key(obj['key'])
                 print("action: {0}, time: {1}, key: {2}".format(action, _time, str(key)))
                 if action == "pressed_key":
-                    keyboard.press(key)
+                    keyboard_press(key)
                 else:
-                    keyboard.release(key)
+                    keyboard_release(key)
                 blocker.wait(pause_time)
 
             instruction_index += 1
